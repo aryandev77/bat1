@@ -11,6 +11,7 @@ const bad = (m, s = 400) => json({ error: m }, s);
 const sha = (s) => createHash("sha256").update(s).digest("hex");
 const rid = (n = 8) => randomBytes(n).toString("hex");
 const cookie = (v, age) => `bat_s=${v}; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=${age}`;
+const pub = (u) => ({ id: u.id, username: u.username, name: u.name || u.username, bio: u.bio || "", av: u.av || 0, at: u.at });
 const newPin = () => String(randomInt(0, 10000)).padStart(4, "0");
 
 async function hash(s, salt = rid(16)) {
@@ -62,7 +63,8 @@ export default async (req) => {
   const M = req.method;
   if (M !== "GET" && req.headers.get("x-bat") !== "1") return bad("Blocked.", 403);
   const upload = a === "chats" && c === "upload";
-  const body = M === "POST" && !upload ? await req.json().catch(() => ({})) : {};
+  const rawIn = upload || a === "avatar";
+  const body = M === "POST" && !rawIn ? await req.json().catch(() => ({})) : {};
 
   try {
     if (a === "signup" && M === "POST") {
@@ -71,7 +73,7 @@ export default async (req) => {
       if (pw.length < 6) return bad("Password needs at least 6 characters.");
       if (await db("names").get(name.toLowerCase(), { type: "json" })) return bad("That username is taken.", 409);
       const pin = newPin();
-      const u = { id: rid(8), username: name, pw: await hash(pw), rec: await hash(pin), bio: "", at: Date.now() };
+      const u = { id: rid(8), username: name, pw: await hash(pw), rec: await hash(pin), bio: "", name: String(body.name || "").trim().slice(0, 30) || name, at: Date.now() };
       await db("users").setJSON(u.id, u);
       await db("names").setJSON(name.toLowerCase(), { id: u.id });
       return json({ username: name, recovery: pin }, 200, { "set-cookie": await startSession(u) });
@@ -112,9 +114,10 @@ export default async (req) => {
     const me = await whoami(req);
     if (!me) return bad("Sign in first.", 401);
 
-    if (a === "me" && M === "GET") return json({ id: me.id, username: me.username, bio: me.bio || "" });
+    if (a === "me" && M === "GET") return json({ id: me.id, username: me.username, name: me.name || me.username, bio: me.bio || "", av: me.av || 0 });
     if (a === "profile" && M === "POST") {
       me.bio = String(body.bio || "").slice(0, 80);
+      if (typeof body.name === "string") me.name = body.name.trim().slice(0, 30) || me.username;
       await db("users").setJSON(me.id, me);
       return json({ ok: true });
     }
@@ -135,9 +138,59 @@ export default async (req) => {
       const mine = db("mychat");
       const { blobs } = await mine.list({ prefix: me.id + "/" });
       for (const x of blobs) await dropChat(x.key.split("/")[1]);
+      const nt = db("notes");
+      for (const x of (await nt.list({ prefix: me.id + "/" })).blobs) await nt.delete(x.key);
+      await db("avatars").delete(me.id);
       await db("names").delete(me.username.toLowerCase());
       await db("users").delete(me.id);
       return json({ ok: true }, 200, { "set-cookie": cookie("", 0) });
+    }
+
+    if (a === "user" && M === "GET") {
+      const u = await db("users").get(String(b || ""), { type: "json" });
+      return u ? json(pub(u)) : bad("User not found.", 404);
+    }
+    if (a === "avatar" && M === "POST") {
+      if (b === "remove") { await db("avatars").delete(me.id); me.av = 0; await db("users").setJSON(me.id, me); return json({ av: 0 }); }
+      const type = (req.headers.get("content-type") || "").split(";")[0];
+      if (!/^image\/(jpeg|png|webp)$/.test(type)) return bad("Use a JPEG, PNG or WebP image.");
+      const buf = await req.arrayBuffer();
+      if (!buf.byteLength || buf.byteLength > 600000) return bad("That photo is too large.", 413);
+      await db("avatars").set(me.id, buf, { metadata: { type } });
+      me.av = Date.now();
+      await db("users").setJSON(me.id, me);
+      return json({ av: me.av });
+    }
+    if (a === "avatar" && M === "GET") {
+      const r = await db("avatars").getWithMetadata(String(b || ""), { type: "arrayBuffer" });
+      if (!r) return bad("Not found.", 404);
+      return new Response(r.data, { headers: { "content-type": r.metadata.type, "cache-control": "private, max-age=86400", "content-security-policy": "sandbox", "x-content-type-options": "nosniff" } });
+    }
+    if (a === "notes") {
+      const st = db("notes"), okId = (x) => /^[a-f0-9]{12}$/.test(x);
+      if (!b && M === "GET") {
+        const { blobs } = await st.list({ prefix: me.id + "/" });
+        const rows = (await Promise.all(blobs.map((x) => st.get(x.key, { type: "json" })))).filter(Boolean);
+        return json({ notes: rows.sort((p, q) => q.updated - p.updated) });
+      }
+      if (!b && M === "POST") {
+        const text = String(body.text || "").slice(0, 4000);
+        let id = String(body.id || "");
+        if (id && !okId(id)) return bad("Bad note.");
+        if (!id) {
+          if (!text.trim()) return bad("Write something first.");
+          if ((await st.list({ prefix: me.id + "/" })).blobs.length >= 100) return bad("You can keep up to 100 notes.");
+          id = rid(6);
+        }
+        const old = await st.get(`${me.id}/${id}`, { type: "json" });
+        const note = { id, text, created: old ? old.created : Date.now(), updated: Date.now() };
+        await st.setJSON(`${me.id}/${id}`, note);
+        return json({ note });
+      }
+      if (b === "delete" && M === "POST") {
+        if (okId(String(body.id || ""))) await st.delete(`${me.id}/${body.id}`);
+        return json({ ok: true });
+      }
     }
 
     if (a === "search" && M === "GET") {
@@ -148,7 +201,7 @@ export default async (req) => {
         const r = await db("names").get(x.key, { type: "json" });
         return r ? db("users").get(r.id, { type: "json" }) : null;
       }));
-      return json({ users: rows.filter((u) => u && u.id !== me.id).map((u) => ({ id: u.id, username: u.username, bio: u.bio || "" })) });
+      return json({ users: rows.filter((u) => u && u.id !== me.id).map(pub) });
     }
 
     if (a === "media" && M === "GET") {
@@ -170,7 +223,11 @@ export default async (req) => {
       if (!b && M === "GET") {
         const { blobs } = await mine.list({ prefix: me.id + "/" });
         const rows = (await Promise.all(blobs.map((x) => mine.get(x.key, { type: "json" })))).filter(Boolean);
-        return json({ chats: rows.sort((p, q) => (q.at || 0) - (p.at || 0)) });
+        const full = await Promise.all(rows.map(async (r) => {
+          const u = await db("users").get(r.with.id, { type: "json" });
+          return { ...r, with: u ? pub(u) : r.with };
+        }));
+        return json({ chats: full.sort((p, q) => (q.at || 0) - (p.at || 0)) });
       }
       if (!b && M === "POST") {
         const o = await db("users").get(String(body.userId || ""), { type: "json" });
@@ -208,7 +265,7 @@ export default async (req) => {
         await db("reads").setJSON(`${me.id}/${b}`, { t: Date.now() });
         const mk = `${me.id}/${b}`, e = await mine.get(mk, { type: "json" });
         if (e && e.unread) await mine.setJSON(mk, { ...e, unread: 0 });
-        return json({ with: other ? other.username : "Deleted account", otherRead: or ? or.t : 0, ids: all.slice(-100).map((k) => k.slice(b.length + 1)), messages });
+        return json({ with: other ? other.name || other.username : "Deleted account", peer: other ? pub(other) : null, otherRead: or ? or.t : 0, ids: all.slice(-100).map((k) => k.slice(b.length + 1)), messages });
       }
       if (c === "delete" && M === "POST") {
         const id = String(body.id || "");

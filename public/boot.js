@@ -1,5 +1,6 @@
 // Shows a readable message instead of a blank screen if the app fails to start.
 (function () {
+  try { document.documentElement.dataset.theme = localStorage.getItem("bat.theme") || "default"; } catch (e) {}
   var app = function () { return document.getElementById("app"); };
   function show(msg) {
     var a = app();

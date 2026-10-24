@@ -1,5 +1,9 @@
 const app = document.getElementById("app");
 let me = null, timer = null;
+const applyTheme = () => { document.documentElement.dataset.theme = localStorage.getItem("bat.theme") || "default"; };
+applyTheme();
+// Add more lines about the creator here; each string becomes a paragraph on the "About the creator" page.
+const CREATOR_MORE = [];
 
 const h = (tag, attrs = {}, ...kids) => {
   const e = document.createElement(tag);
@@ -35,6 +39,9 @@ const ICON = {
   box: '<path d="M4 7l8-4 8 4v10l-8 4-8-4z"/><path d="M4 7l8 4 8-4M12 11v10"/>',
   help: '<circle cx="12" cy="12" r="9"/><path d="M9.5 9.5a2.5 2.5 0 015 0c0 2-2.5 2-2.5 4M12 17h.01"/>',
   info: '<circle cx="12" cy="12" r="9"/><path d="M12 11v6M12 7.5h.01"/>',
+  pin: '<path d="M9 4h6l-1 6 3 3H7l3-3zM12 13v7"/>',
+  archive: '<path d="M4 6h16v4H4zM6 10v9h12v-9M10 14h4"/>',
+  check: '<path d="M5 12l5 5L20 7"/>',
   doc: '<path d="M6 3h9l3 3v15H6z"/><path d="M9 11h6M9 15h6"/>',
   note: '<path d="M5 4h14v16H5z"/><path d="M8 9h8M8 13h8M8 17h5"/>',
   book: '<path d="M4 5a2 2 0 012-2h13v16H6a2 2 0 00-2 2z"/><path d="M4 19V5"/>',
@@ -78,6 +85,31 @@ const field = (ic, ph, type = "text", ac = "off") => {
   return { w, i };
 };
 
+const darkMain = (...k) => h("main", { class: "body dark" }, ...k);
+const popup = (...kids) => {
+  const bk = h("div", { class: "sbk", onclick: (e) => e.target === bk && bk.remove() }, h("div", { class: "sbox" }, ...kids));
+  app.append(bk); return bk;
+};
+const sheet = (rows) => {
+  const bk = popup(...rows.map(([t, fn, cls]) => h("button", { class: "sbtn " + (cls || ""), onclick: async () => { bk.remove(); try { await fn(); } catch (e) { alert(e.message); } } }, t)),
+    h("button", { class: "sbtn cancel", onclick: () => bk.remove() }, "Cancel"));
+  return bk;
+};
+const lightbox = (u) => {
+  const bk = h("div", { class: "lbx", onclick: () => bk.remove() }, u.av ? h("img", { src: `/api/avatar/${u.id}?v=${u.av}`, alt: "Profile photo" }) : pic(u, "pav big"));
+  app.append(bk);
+};
+const tapPic = (u) => { const p = pic(u, "pav"); p.onclick = () => lightbox(u); return p; };
+const statusText = (st) => {
+  if (!st || !st.last && !st.typing) return "";
+  if (st.typing) return "typing…";
+  const ms = Date.now() - st.last;
+  if (ms < 75000) return "active";
+  const m = Math.round(ms / 60000);
+  return "active " + (m < 60 ? m + "m" : m < 1440 ? Math.round(m / 60) + "h" : Math.round(m / 1440) + "d") + " ago";
+};
+const menuItem = (ic, t, sub, href) => h("a", { class: "item", href }, icon(ic), h("div", { class: "mid" }, h("b", {}, t), sub ? h("span", {}, sub) : null), icon("chev"));
+
 function splash() {
   if (sessionStorage.getItem("bat.s")) return;
   sessionStorage.setItem("bat.s", "1");
@@ -118,29 +150,31 @@ function authView(mode = "login") {
   const foot = mode === "login"
     ? [h("p", { class: "mid-link" }, link("Create new account", "register")), h("p", { class: "mid-link" }, link("Forgot password?", "forgot"))]
     : [h("p", { class: "mid-link" }, link(mode === "register" ? "I already have an account" : "Back to log in", "login"))];
-  view(main(h("div", { class: "welcome" }, hero,
+  view(darkMain(h("div", { class: "welcome" }, hero,
     h("h1", {}, { login: "Welcome to BAT", register: "Create your account", forgot: "Reset your password" }[mode]),
     h("p", { class: "sub" }, { login: "Sign in to chat with your circle", register: "Pick an ID. Friends find you by it.", forgot: "Enter your ID and your 4-digit code" }[mode]),
     h("div", { class: "wform" }, form, ...foot))));
 }
 
 function recoveryView(pin) {
-  view(main(h("div", { class: "auth" }, h("div", { class: "word big" }, "BAT"), h("h1", {}, "Your recovery code"),
+  view(darkMain(h("div", { class: "auth" }, h("div", { class: "word big" }, "BAT"), h("h1", {}, "Your recovery code"),
     h("div", { class: "pin" }, pin),
     h("p", { class: "note" }, "If you forget your password, this code gets you back in. Write it down now. It is shown only once."),
     h("button", { class: "btn", onclick: () => { location.hash = "#/"; route(); } }, "I wrote it down"))));
 }
 
-async function chatsView() {
+async function chatsView(archived = false) {
   const list = h("div");
   const row = (c) => h("a", { class: "row", href: "#/c/" + c.cid }, pic(c.with),
     h("div", { class: "mid" }, h("b", {}, c.with.name || c.with.username), h("span", {}, c.preview || "No messages yet")),
-    h("div", { class: "end" }, h("time", {}, c.preview ? stamp(c.at) : ""), c.unread ? h("i", { class: "badge" }, String(c.unread)) : null));
+    h("div", { class: "end" }, h("time", {}, c.preview ? stamp(c.at) : ""), c.unread ? h("i", { class: "badge" }, String(c.unread)) : c.pinned ? icon("pin") : null));
   const load = async () => {
     const { chats } = await api("chats");
-    list.replaceChildren(...(chats.length ? chats.map(row) : [h("p", { class: "empty" }, "No chats yet. Search a username to start.")]));
+    const rows = chats.filter((c) => !!c.archived === archived).map(row), arch = chats.filter((c) => c.archived);
+    if (!archived && arch.length) rows.unshift(h("a", { class: "row", href: "#/archived" }, icon("archive"), h("div", { class: "mid" }, h("b", {}, "Archived"), h("span", {}, arch.length + (arch.length === 1 ? " chat" : " chats")))));
+    list.replaceChildren(...(rows.length ? rows : [h("p", { class: "empty" }, archived ? "No archived chats." : "No chats yet. Search an ID to start.")]));
   };
-  view(bar(h("span", { class: "word" }, "BAT"), h("a", { class: "ibtn", href: "#/search", "aria-label": "Search" }, icon("search"))), main(list), nav("#/"));
+  view(archived ? bar(back("#/"), h("b", {}, "Archived"), h("span")) : bar(h("span", { class: "word" }, "BAT"), h("a", { class: "ibtn", href: "#/search", "aria-label": "Search" }, icon("search"))), main(list), nav("#/"));
   await load();
   timer = setInterval(() => !document.hidden && load().catch(() => {}), 8000);
 }
@@ -148,22 +182,33 @@ async function chatsView() {
 function searchView() {
   const q = field("search", "Search by ID (username)"); q.w.style.margin = ".8rem 1rem";
   const out = h("div");
+  const hist = () => { try { return JSON.parse(localStorage.getItem("bat.hist") || "[]"); } catch { return []; } };
+  const remember = (u) => localStorage.setItem("bat.hist", JSON.stringify([u, ...hist().filter((x) => x.id !== u.id)].slice(0, 10)));
+  const open = async (u) => {
+    remember({ id: u.id, username: u.username, name: u.name, av: u.av });
+    const { cid } = await api("chats", "POST", { userId: u.id }); location.hash = "#/c/" + cid;
+  };
+  const urow = (u) => h("button", { class: "row", onclick: () => open(u).catch((e) => alert(e.message)) }, pic(u),
+    h("div", { class: "mid" }, h("b", {}, u.name), h("span", {}, "@" + u.username + (u.bio ? "  ·  " + u.bio : ""))));
+  const showHist = () => {
+    const hs = hist();
+    out.replaceChildren(...(hs.length ? [h("div", { class: "histhead" }, h("span", {}, "Recent searches"), h("button", { class: "link", onclick: () => { localStorage.removeItem("bat.hist"); showHist(); } }, "Clear")), ...hs.map(urow)]
+      : [h("p", { class: "empty" }, "Search by someone's ID.")]));
+  };
   let t;
   q.i.oninput = () => {
     clearTimeout(t);
     t = setTimeout(async () => {
-      const v = q.i.value.trim();
-      if (v.length < 2) return out.replaceChildren();
+      const v = q.i.value.trim().replace(/^@/, "");
+      if (v.length < 2) return showHist();
       try {
         const { users } = await api("search?q=" + encodeURIComponent(v));
-        out.replaceChildren(...(users.length ? users.map((u) => h("button", { class: "row", onclick: async () => {
-          const { cid } = await api("chats", "POST", { userId: u.id }); location.hash = "#/c/" + cid;
-        } }, pic(u), h("div", { class: "mid" }, h("b", {}, u.name), h("span", {}, "@" + u.username + (u.bio ? "  ·  " + u.bio : ""))))) : [h("p", { class: "empty" }, "No one found.")]));
+        out.replaceChildren(...(users.length ? users.map(urow) : [h("p", { class: "empty" }, "No one found.")]));
       } catch (e) { out.replaceChildren(h("p", { class: "empty" }, e.message)); }
     }, 250);
   };
   view(bar(h("b", {}, "Search")), main(q.w, out), nav("#/search"));
-  q.i.focus();
+  showHist(); q.i.focus();
 }
 
 async function shrink(f, max = 1600) {
@@ -177,42 +222,63 @@ async function shrink(f, max = 1600) {
 async function chatView(cid) {
   const box = h("div", { class: "msgs" }), err = h("p", { class: "err" });
   const scroller = main(box, err);
-  const title = h("b", {}, "…"), avatar = h("span", { class: "av" }, "?");
+  const title = h("b", {}, "…"), sub = h("small", {}), avatar = h("span", { class: "av" }, "?");
   const text = h("textarea", { rows: "1", placeholder: "Type a message", "aria-label": "Message" });
   const file = h("input", { type: "file", hidden: "" });
-  const els = new Map();
-  let last = "", otherRead = 0, rec = null, peerId = "";
+  const banner = h("div", { class: "blockbar", hidden: "" }, h("span", {}, "You blocked this person."),
+    h("button", { class: "link", onclick: async () => { await api(`chats/${cid}/block`, "POST", { blocked: false }); pull(); } }, "Unblock"));
+  const els = new Map(), meta = { flags: {}, blocked: null, peer: null };
+  let last = "", otherRead = 0, rec = null, lastTyping = 0;
   const toEnd = () => { scroller.scrollTop = scroller.scrollHeight; };
 
+  const editPop = (m, ent) => {
+    const ta = h("textarea", { class: "editta", "aria-label": "Edit message" }); ta.value = ent.text;
+    const bk = popup(h("p", { class: "mute" }, "Edit message"), ta, h("div", { class: "row2" },
+      h("button", { class: "sbtn", onclick: () => bk.remove() }, "Cancel"),
+      h("button", { class: "sbtn primary", onclick: async () => {
+        const t = ta.value.trim(); if (!t) return;
+        try { await api(`chats/${cid}/edit`, "POST", { id: m.id, text: t }); ent.text = t; ent.p.replaceChildren(...linkify(t)); ent.ed.textContent = "edited · "; bk.remove(); }
+        catch (e) { alert(e.message); }
+      } }, "Save")));
+    ta.focus();
+  };
+  const msgMenu = (m, ent) => {
+    const mine = m.from === me.id, rows = [];
+    if (m.kind === "text") rows.push(["Copy", () => navigator.clipboard.writeText(ent.text)]);
+    if (mine && m.kind === "text") rows.push(["Edit", () => editPop(m, ent)]);
+    if (mine) rows.push(["Delete", async () => {
+      if (!confirm("Delete this message?")) return;
+      await api(`chats/${cid}/delete`, "POST", { id: m.id }); ent.el.remove(); els.delete(m.id);
+    }, "danger"]);
+    if (rows.length) sheet(rows);
+  };
   const draw = (m) => {
     const mine = m.from === me.id, url = `/api/media/${cid}/${m.id}`;
-    const body = m.kind === "text" ? h("p", {}, ...linkify(m.text))
-      : m.kind === "photo" ? h("a", { href: url, target: "_blank", rel: "noopener" }, h("img", { src: url, alt: "Photo", loading: "lazy" }))
+    const p = m.kind === "text" ? h("p", {}, ...linkify(m.text)) : null;
+    const body = p || (m.kind === "photo" ? h("a", { href: url, target: "_blank", rel: "noopener" }, h("img", { src: url, alt: "Photo", loading: "lazy" }))
       : m.kind === "voice" ? h("audio", { controls: "", src: url, preload: "none" })
-      : h("a", { class: "file", href: url, download: m.name }, icon("doc"), h("div", {}, h("b", {}, m.name), h("small", {}, size(m.size))));
-    const tick = mine ? h("span", {}) : null;
-    const el = h("div", { class: "msg " + (mine ? "me" : "") }, body, h("span", { class: "mt" }, time(m.at), tick));
-    if (mine) {
-      const del = h("button", { class: "del", hidden: "" }, "Delete");
-      del.onclick = async () => {
-        if (!confirm("Delete this message?")) return;
-        try { await api(`chats/${cid}/delete`, "POST", { id: m.id }); el.remove(); els.delete(m.id); } catch (e) { err.textContent = e.message; }
-      };
-      el.append(del);
-      el.onclick = (e) => { if (!e.target.closest("a,audio,button")) del.hidden = !del.hidden; };
-    }
-    els.set(m.id, { tick, at: m.at, el });
-    return el;
+      : h("a", { class: "file", href: url, download: m.name }, icon("doc"), h("div", {}, h("b", {}, m.name), h("small", {}, size(m.size)))));
+    const ent = { at: m.at, text: m.text || "", editedAt: 0, p, ed: h("span", {}, m.edited ? "edited · " : ""), tick: mine ? h("span", {}) : null };
+    ent.el = h("div", { class: "msg " + (mine ? "me" : "") }, body, h("span", { class: "mt" }, ent.ed, time(m.at), ent.tick));
+    ent.el.onclick = (e) => { if (!e.target.closest("a,audio,button")) msgMenu(m, ent); };
+    els.set(m.id, ent);
+    return ent.el;
   };
   async function pull() {
     const d = await api(`chats/${cid}/messages?after=${encodeURIComponent(last)}`);
-    title.textContent = d.with; otherRead = d.otherRead;
-    if (d.peer && !avatar.dataset.p) { avatar.dataset.p = "1"; peerId = d.peer.id; avatar.replaceChildren(...pic(d.peer).childNodes); }
+    title.textContent = d.with; otherRead = d.otherRead; sub.textContent = statusText(d.status);
+    Object.assign(meta, { flags: d.flags, blocked: d.blocked, peer: d.peer });
+    if (d.peer && !avatar.dataset.p) { avatar.dataset.p = "1"; avatar.replaceChildren(...pic(d.peer).childNodes); }
+    banner.hidden = d.blocked !== "me"; text.disabled = d.blocked === "me";
     const near = !last || scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight < 160;
     const live = new Set(d.ids), first = d.ids[0] || "";
     els.forEach((v, id) => { if (id >= first && !live.has(id)) { v.el.remove(); els.delete(id); } });
     for (const m of d.messages) { box.append(draw(m)); last = m.id; }
-    els.forEach(({ tick, at }) => tick && (tick.textContent = at <= otherRead ? "  ✓✓" : "  ✓"));
+    for (const [id, v] of Object.entries(d.edits || {})) {
+      const e = els.get(id);
+      if (e && e.p && e.editedAt !== v.t && v.text !== e.text) { e.editedAt = v.t; e.text = v.text; e.p.replaceChildren(...linkify(v.text)); e.ed.textContent = "edited · "; }
+    }
+    els.forEach((e) => e.tick && (e.tick.textContent = e.at <= otherRead ? "  ✓✓" : "  ✓"));
     if (d.messages.length && near) toEnd();
   }
   const sendText = async () => {
@@ -251,8 +317,24 @@ async function chatView(cid) {
     } catch { err.textContent = "Microphone is not allowed."; }
   };
   text.onkeydown = (e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendText(); } };
-
-  view(bar(back("#/"), h("div", { class: "who", onclick: () => { if (peerId) location.hash = "#/u/" + peerId; } }, avatar, title)), scroller,
+  text.oninput = () => {
+    const now = Date.now();
+    if (text.value && now - lastTyping > 2500) { lastTyping = now; api(`chats/${cid}/typing`, "POST", {}).catch(() => {}); }
+  };
+  const chatMenu = () => {
+    const f = meta.flags || {}, blockedByMe = meta.blocked === "me";
+    sheet([
+      ...(meta.peer ? [["View profile", () => { location.hash = "#/u/" + meta.peer.id; }]] : []),
+      [f.pinned ? "Unpin chat" : "Pin chat", async () => { await api(`chats/${cid}/flags`, "POST", { pinned: !f.pinned }); await pull(); }],
+      [f.archived ? "Unarchive chat" : "Archive chat", async () => { await api(`chats/${cid}/flags`, "POST", { archived: !f.archived }); if (!f.archived) location.hash = "#/"; else await pull(); }],
+      [blockedByMe ? "Unblock" : "Block", async () => {
+        if (!blockedByMe && !confirm("Block this person? They will not be able to message you.")) return;
+        await api(`chats/${cid}/block`, "POST", { blocked: !blockedByMe }); await pull();
+      }, blockedByMe ? "" : "danger"],
+    ]);
+  };
+  const avBtn = h("button", { class: "hav", "aria-label": "Open profile", onclick: () => { if (meta.peer) location.hash = "#/u/" + meta.peer.id; } }, avatar);
+  view(bar(back("#/"), h("div", { class: "who", onclick: chatMenu }, title, sub), avBtn), scroller, banner,
     h("div", { class: "composer" }, h("div", { class: "in" },
       h("button", { class: "ibtn", "aria-label": "Attach", onclick: () => file.click() }, icon("clip")), file, text, mic,
       h("button", { class: "ibtn", "aria-label": "Send", onclick: sendText }, icon("send")))));
@@ -285,7 +367,7 @@ async function profileView(id) {
   } }, own ? "Edit profile" : "Message");
   view(bar(back(own ? "#/settings" : "#/search"), h("b", {}, "Profile"), h("span")),
     main(h("div", { class: "pwrap" }, h("div", { class: "pcard" }, h("div", { class: "pcover" }, logo()),
-      h("div", { class: "pmain" }, h("div", { class: "prow" }, pic(u, "pav"), btn),
+      h("div", { class: "pmain" }, h("div", { class: "prow" }, tapPic(u), btn),
         h("h2", { class: "pname" }, u.name), h("p", { class: "phandle" }, "@" + u.username),
         u.bio ? h("p", { class: "pbio" }, u.bio) : null,
         h("div", { class: "pstats" }, h("b", {}, "Joined"), h("span", {}, new Date(u.at).toLocaleDateString([], { month: "short", year: "numeric" }))))))),
@@ -307,20 +389,28 @@ async function editView() {
       m.av = d.av; paint(); say("Photo updated.");
     } catch (e) { say(e.message); }
   };
-  const nm = field("user", "Name"), bio = field("info", "Bio");
-  nm.i.value = m.name; nm.i.maxLength = 30; bio.i.value = m.bio; bio.i.maxLength = 80;
+  const nm = field("user", "Name"), bio = field("info", "Bio"), un = field("user", "ID (username)");
+  nm.i.value = m.name; nm.i.maxLength = 30; bio.i.value = m.bio; bio.i.maxLength = 80; un.i.value = m.username; un.i.maxLength = 20;
+  const next = (m.unameAt || 0) + 17 * 864e5, locked = next > Date.now();
+  un.i.disabled = locked;
   const act = (fn, ok) => async () => { try { await fn(); say(ok); } catch (e) { say(e.message); } };
   view(bar(back("#/settings"), h("b", {}, "Edit profile"), h("span")), main(h("div", { class: "auth" },
     holder, h("button", { class: "btn ghost", onclick: () => file.click() }, "Change photo"), file,
     m.av ? h("p", { class: "mid-link" }, h("button", { class: "link", onclick: act(async () => { await api("avatar/remove", "POST", {}); m.av = 0; paint(); }, "Photo removed.") }, "Remove photo")) : null,
     msg, nm.w, bio.w,
-    h("button", { class: "btn", onclick: act(() => api("profile", "POST", { name: nm.i.value, bio: bio.i.value }), "Saved.") }, "Save"))));
+    h("button", { class: "btn", onclick: act(() => api("profile", "POST", { name: nm.i.value, bio: bio.i.value }), "Saved.") }, "Save"),
+    h("span", { class: "cap" }, "Your ID"), un.w,
+    h("p", { class: "note" }, locked ? "You can change your ID again on " + new Date(next).toLocaleDateString([], { day: "numeric", month: "long" }) + "." : "You can change your ID once every 17 days. Friends find you by it."),
+    h("button", { class: "btn ghost", ...(locked ? { disabled: "" } : {}), onclick: async () => {
+      if (!confirm("Change your ID to @" + un.i.value.trim().replace(/^@/, "") + "? You can't change it again for 17 days.")) return;
+      try { const r = await api("username", "POST", { username: un.i.value }); me.username = r.username; await editView(); } catch (e) { say(e.message); }
+    } }, "Change ID"))));
 }
 
 const fmtDate = (t) => new Date(t).toLocaleDateString([], { weekday: "long", day: "numeric", month: "long", year: "numeric" });
 let notesCache = [];
 const loadNotes = async () => (notesCache = (await api("notes")).notes);
-const notesMain = (...k) => h("main", { class: "body notes" }, ...k);
+const notesMain = (...k) => h("main", { class: "body notes dark" }, ...k);
 
 async function notesView() {
   await loadNotes();
@@ -375,20 +465,20 @@ async function noteEdit(id) {
     clearTimeout(t2); if (cur) await api("notes/delete", "POST", { id: cur }); location.hash = "#/notes";
   } }, "−");
   view(h("header", { class: "nbar" }, h("button", { class: "ibtn", "aria-label": "Done", onclick: done }, icon("back")), h("span", { class: "ndate" }, "Note"), del),
-    h("main", { class: "body notes sheetwrap" }, h("div", { class: "sheet" }, h("div", { class: "pdate" }, fmtDate(note ? note.created : Date.now())), ta, err),
+    h("main", { class: "body notes dark sheetwrap" }, h("div", { class: "sheet" }, h("div", { class: "pdate" }, fmtDate(note ? note.created : Date.now())), ta, err),
       h("button", { class: "btn donebtn", onclick: done }, "Done")));
   ta.focus();
 }
 
 const PAGES = {
-  "privacy-security": ["Privacy & Security", ["Messages and files are stored on the BAT server so you can read them on any device you sign in from.", "They are not end-to-end encrypted. Whoever runs the server can technically read them.", "Passwords and recovery codes are stored hashed, never as plain text.", "Only the two people in a chat can open it through the app."]],
+  "privacy-security": ["Privacy & Security", ["Messages and files are stored on the BAT server so you can read them on any device you sign in from.", "BAT does not use end-to-end encryption. Aryan Pal runs BAT for his friends and has promised not to read anyone's chats.", "Passwords and recovery codes are stored hashed, never as plain text.", "Only the two people in a chat can open it through the app."]],
   notifications: ["Notifications", ["BAT does not send push notifications.", "New messages show up while the app is open."]],
   appearance: ["Appearance", ["BAT uses a dark theme everywhere."]],
   storage: ["Data & Storage", ["Photos, files and voice messages are saved on the server.", "Each file can be up to 5 MB.", "Deleting a message also deletes its file.", "Deleting your account deletes your chats."]],
   help: ["Help & Support", ["Forgot your password? On the login screen tap Forgot Password, then enter your username, your 4-digit recovery code and a new password.", "After 5 wrong codes the reset is locked for an hour.", "If you lost both your password and your code, the account cannot be recovered.", "For anything else, contact Aryan Pal."]],
   about: ["About BAT", ["BAT stands for Black Anonymous Telegram.", "It is a private messenger for a small circle of people: find a username, chat, and share photos, files and voice messages.", "Version 1.0"]],
-  creator: ["About the creator", ["BAT was created by Aryan Pal.", "Founder and creator."]],
-  policy: ["Privacy policy", ["BAT is a private app for invited people.", "What we store: your username, a hashed password, a hashed recovery code, an optional bio, your chats with their messages and files, and the time each message was sent.", "What we do not collect: email, phone number, contacts, location, ads or analytics.", "We use one session cookie to keep you signed in.", "Messages are not end-to-end encrypted, so the person running the server can technically read them.", "You can delete any of your messages, and you can delete your account in Settings, which removes your chats."]],
+  creator: ["About the creator", ["Aryan Pal is the founder and creator of BAT.", "He designed the look, chose the name and built BAT for his close friends, one version at a time. It started as a spy-style idea for passing secrets around and slowly turned into a clean, simple messenger.", ...CREATOR_MORE]],
+  policy: ["Privacy policy", ["BAT is a private app for invited people.", "What we store: your username, a hashed password, a hashed recovery code, an optional bio, your chats with their messages and files, and the time each message was sent.", "What we do not collect: email, phone number, contacts, location, ads or analytics.", "We use one session cookie to keep you signed in.", "BAT does not use end-to-end encryption, and messages are stored on BAT's server. Aryan Pal, who runs BAT, has promised not to read them.", "You can delete any of your messages, and you can delete your account in Settings, which removes your chats."]],
   terms: ["Terms", ["Use BAT respectfully.", "Do not use it for anything illegal or to harass others.", "The creator can remove accounts that break these rules.", "BAT is provided as it is, with no guarantees."]],
 };
 function pageView(slug) {
@@ -396,22 +486,65 @@ function pageView(slug) {
   view(bar(back("#/settings"), h("b", {}, t), h("span")), main(h("div", { class: "page" }, ...ps.map((x) => h("p", {}, x)))));
 }
 
+async function privacyView() {
+  const m = await api("me");
+  const box = h("input", { type: "checkbox" }); box.checked = !m.hideActive;
+  box.onchange = async () => {
+    try { await api("profile", "POST", { hideActive: !box.checked }); me.hideActive = !box.checked; }
+    catch (e) { alert(e.message); box.checked = !box.checked; }
+  };
+  view(bar(back("#/settings"), h("b", {}, "Privacy & Security"), h("span")), main(
+    h("label", { class: "chk" }, box, h("div", { class: "mid" }, h("b", {}, "Show when I'm active"), h("span", {}, "If you turn this off, you also won't see when others are active or typing."))),
+    h("div", { class: "page" }, ...PAGES["privacy-security"][1].map((x) => h("p", {}, x)))));
+}
+
+function appearanceView() {
+  const cur = () => localStorage.getItem("bat.theme") || "default";
+  const list = h("div");
+  const paint = () => list.replaceChildren(...[["default", "Default", "Pure black"], ["dark", "Dark", "Soft charcoal"], ["light", "Light", "Bright and clean"]]
+    .map(([v, t, sb]) => h("button", { class: "row", onclick: () => { localStorage.setItem("bat.theme", v); applyTheme(); paint(); } },
+      h("div", { class: "mid" }, h("b", {}, t), h("span", {}, sb)), cur() === v ? icon("check") : null)));
+  paint();
+  view(bar(back("#/settings"), h("b", {}, "Appearance"), h("span")), main(list));
+}
+
+function helpView() {
+  view(bar(back("#/settings"), h("b", {}, "Help & feedback"), h("span")), main(
+    menuItem("doc", "Privacy policy", "", "#/p/policy"), menuItem("doc", "Terms", "", "#/p/terms"),
+    menuItem("help", "Help", "Forgot password, contact", "#/p/help"), menuItem("pen", "Feedback", "Tell us what to improve", "#/feedback"),
+    me && me.admin ? menuItem("note", "Read feedback", "Admin only", "#/inbox") : null));
+}
+
+function feedbackView() {
+  const ta = h("textarea", { class: "editta", placeholder: "What should we improve? Bugs, ideas, anything.", "aria-label": "Feedback", maxlength: "1000" });
+  const msg = h("p", { class: "note" });
+  view(bar(back("#/help"), h("b", {}, "Feedback"), h("span")), main(h("div", { class: "pad" }, ta, msg,
+    h("button", { class: "btn", onclick: async () => {
+      try { await api("feedback", "POST", { text: ta.value }); ta.value = ""; msg.textContent = "Thank you. Your feedback was sent."; } catch (e) { msg.textContent = e.message; }
+    } }, "Send"))));
+}
+
+async function inboxView() {
+  const { items } = await api("feedback");
+  view(bar(back("#/help"), h("b", {}, "Feedback"), h("span")), main(...(items.length
+    ? items.map((x) => h("div", { class: "panelrow" }, h("small", {}, "@" + x.from + " · " + stamp(x.at)), h("p", {}, x.text)))
+    : [h("p", { class: "empty" }, "No feedback yet.")])));
+}
+
 async function settingsView() {
   const m = await api("me");
-  const item = (ic, t, sub, href) => h("a", { class: "item", href }, icon(ic), h("div", { class: "mid" }, h("b", {}, t), sub ? h("span", {}, sub) : null), icon("chev"));
+  const theme = { default: "Default", dark: "Dark", light: "Light" }[localStorage.getItem("bat.theme") || "default"];
   view(bar(h("b", {}, "Settings")), main(
     h("a", { class: "profile", href: "#/u/" + m.id }, pic(m, "xl"), h("h2", {}, m.name), h("span", { class: "hand" }, "@" + m.username)),
-    item("user", "Edit profile", "Photo, name, bio", "#/edit"),
-    item("user", "Account", "Password, recovery code", "#/account"),
-    item("shield", "Privacy & Security", "How your data is handled", "#/p/privacy-security"),
-    item("bell", "Notifications", "Message alerts", "#/p/notifications"),
-    item("moon", "Appearance", "Dark mode", "#/p/appearance"),
-    item("box", "Data & Storage", "Files and media", "#/p/storage"),
-    item("help", "Help & Support", "Forgot password, contact", "#/p/help"),
-    item("info", "About BAT", "", "#/p/about"),
-    item("user", "About the creator", "", "#/p/creator"),
-    item("doc", "Privacy policy", "", "#/p/policy"),
-    item("doc", "Terms", "", "#/p/terms"),
+    menuItem("user", "Edit profile", "Photo, name, ID, bio", "#/edit"),
+    menuItem("user", "Account", "Password, recovery code", "#/account"),
+    menuItem("shield", "Privacy & Security", "Active status, how your data is handled", "#/p/privacy-security"),
+    menuItem("moon", "Appearance", theme, "#/p/appearance"),
+    menuItem("bell", "Notifications", "Message alerts", "#/p/notifications"),
+    menuItem("box", "Data & Storage", "Files and media", "#/p/storage"),
+    menuItem("help", "Help & feedback", "Policy, terms, help, feedback", "#/help"),
+    menuItem("info", "About BAT", "", "#/p/about"),
+    menuItem("user", "About the creator", "", "#/p/creator"),
     h("div", { class: "pad" }, h("button", { class: "btn ghost", onclick: async () => { await api("logout", "POST"); me = null; route(); } }, "Log out"))),
     nav("#/settings"));
 }
@@ -442,7 +575,11 @@ async function route() {
     if (nb) return await browseView(+nb[1]);
     if (ne) return await noteEdit(ne[1]);
     if (c) return await chatView(c[1]);
-    if (pg) return pageView(pg[1]);
+    if (pg) { if (pg[1] === "privacy-security") return await privacyView(); if (pg[1] === "appearance") return appearanceView(); return pageView(pg[1]); }
+    if (loc === "#/archived") return await chatsView(true);
+    if (loc === "#/help") return helpView();
+    if (loc === "#/feedback") return feedbackView();
+    if (loc === "#/inbox") return await inboxView();
     if (loc === "#/search") return searchView();
     if (loc === "#/settings") return await settingsView();
     if (loc === "#/account") return accountView();
@@ -455,4 +592,6 @@ async function route() {
 
 splash();
 window.addEventListener("hashchange", route);
-api("me").then((u) => (me = u)).catch(() => {}).finally(route);
+const ping = () => { if (me && !me.hideActive && !document.hidden) api("ping", "POST", {}).catch(() => {}); };
+setInterval(ping, 25000);
+api("me").then((u) => (me = u)).catch(() => {}).finally(() => { ping(); route(); });

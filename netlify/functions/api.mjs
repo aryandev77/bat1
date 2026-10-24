@@ -11,7 +11,7 @@ const bad = (m, s = 400) => json({ error: m }, s);
 const sha = (s) => createHash("sha256").update(s).digest("hex");
 const rid = (n = 8) => randomBytes(n).toString("hex");
 const cookie = (v, age) => `bat_s=${v}; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=${age}`;
-const pub = (u) => ({ id: u.id, username: u.username, name: u.name || u.username, bio: u.bio || "", av: u.av || 0, at: u.at });
+const pub = (u) => ({ id: u.id, username: u.username, name: u.name || u.username, bio: u.bio || "", av: u.av || 0, links: u.links || {}, at: u.at });
 const isAdmin = (n) => (process.env.ADMIN_CODENAMES || "").toLowerCase().split(",").map((x) => x.trim()).filter(Boolean).includes(String(n).toLowerCase());
 const newPin = () => String(randomInt(0, 10000)).padStart(4, "0");
 
@@ -115,11 +115,21 @@ export default async (req) => {
     const me = await whoami(req);
     if (!me) return bad("Sign in first.", 401);
 
-    if (a === "me" && M === "GET") return json({ id: me.id, username: me.username, name: me.name || me.username, bio: me.bio || "", av: me.av || 0, hideActive: !!me.hideActive, unameAt: me.unameAt || 0, admin: isAdmin(me.username) });
+    if (a === "me" && M === "GET") return json({ id: me.id, username: me.username, name: me.name || me.username, bio: me.bio || "", av: me.av || 0, hideActive: !!me.hideActive, unameAt: me.unameAt || 0, links: me.links || {}, hasLockPin: !!me.lockPin, admin: isAdmin(me.username) });
     if (a === "profile" && M === "POST") {
       me.bio = String(body.bio || "").slice(0, 80);
       if (typeof body.name === "string") me.name = body.name.trim().slice(0, 30) || me.username;
       if (typeof body.hideActive === "boolean") me.hideActive = body.hideActive;
+      if (body.links && typeof body.links === "object") {
+        const clean = {};
+        for (const k of ["instagram", "github", "x", "youtube", "linkedin"]) {
+          let v = String(body.links[k] || "").trim().replace(/^https?:\/\/[^/]+\/?/i, "").replace(/^@/, "");
+          if (k === "linkedin") v = v.replace(/^in\//i, "");
+          v = v.split(/[/?#]/)[0].replace(/^@/, "");
+          if (/^[A-Za-z0-9._-]{1,40}$/.test(v)) clean[k] = v;
+        }
+        me.links = clean;
+      }
       await db("users").setJSON(me.id, me);
       return json({ ok: true });
     }
@@ -181,6 +191,39 @@ export default async (req) => {
         const rows = await Promise.all(blobs.map(async (x) => ({ id: x.key, ...(await st.get(x.key, { type: "json" })) })));
         return json({ items: rows.sort((p, q) => q.at - p.at).slice(0, 50) });
       }
+    }
+    if (a === "lockpin") {
+      if (b === "verify" && M === "POST") {
+        const th = await throttle("lock/" + me.id, 5, 15 * 60000);
+        if (th.locked) return bad("Too many tries. Wait 15 minutes.", 429);
+        if (!me.lockPin || !(await check(String(body.pin || ""), me.lockPin))) { await th.fail(); return bad("Wrong PIN.", 401); }
+        await th.ok();
+        return json({ ok: true });
+      }
+      if (!b && M === "POST") {
+        const pin = String(body.pin || "");
+        if (!/^\d{4,8}$/.test(pin)) return bad("The PIN must be 4 to 8 digits.");
+        if (me.lockPin && !(await check(String(body.old || ""), me.lockPin))) return bad("Your current PIN is wrong.", 401);
+        me.lockPin = await hash(pin);
+        await db("users").setJSON(me.id, me);
+        return json({ ok: true });
+      }
+    }
+    if (a === "library" && M === "GET") {
+      const mine = db("mychat"), st = db("msgs");
+      const { blobs } = await mine.list({ prefix: me.id + "/" });
+      const chats = (await Promise.all(blobs.map((x) => mine.get(x.key, { type: "json" })))).filter((c) => c && !c.locked);
+      const items = [];
+      for (const c of chats) {
+        const u = await db("users").get(c.with.id, { type: "json" });
+        const keys = (await st.list({ prefix: c.cid + "/" })).blobs.map((x) => x.key).sort().slice(-200);
+        const docs = await Promise.all(keys.map((k) => st.get(k, { type: "json" })));
+        docs.forEach((m, i) => {
+          if (m && m.kind !== "text") items.push({ cid: c.cid, id: keys[i].slice(c.cid.length + 1), kind: m.kind, name: m.name, size: m.size || 0, at: m.at, mine: m.from === me.id, with: u ? u.name || u.username : "Deleted account" });
+        });
+      }
+      items.sort((p, q) => q.at - p.at);
+      return json({ items: items.slice(0, 300), count: items.length, total: items.reduce((s, x) => s + x.size, 0) });
     }
     if (a === "user" && M === "GET") {
       const u = await db("users").get(String(b || ""), { type: "json" });
@@ -261,7 +304,7 @@ export default async (req) => {
         const rows = (await Promise.all(blobs.map((x) => mine.get(x.key, { type: "json" })))).filter(Boolean);
         const full = await Promise.all(rows.map(async (r) => {
           const u = await db("users").get(r.with.id, { type: "json" });
-          return { ...r, with: u ? pub(u) : r.with };
+          return { ...r, preview: r.locked ? "Locked chat" : r.preview, with: u ? pub(u) : r.with };
         }));
         return json({ chats: full.sort((p, q) => (q.pinned ? 1 : 0) - (p.pinned ? 1 : 0) || (q.at || 0) - (p.at || 0)) });
       }
@@ -308,7 +351,12 @@ export default async (req) => {
           const ty = await db("typing").get(`${b}/${otherId}`, { type: "json" });
           status = { last: pr ? pr.t : 0, typing: !!ty && Date.now() - ty.t < 5000 };
         }
-        return json({ status, flags: { pinned: !!(e && e.pinned), archived: !!(e && e.archived) },
+        let pinned = null;
+        if (ch.pinnedMsg) {
+          const pm = await db("msgs").get(`${b}/${ch.pinnedMsg}`, { type: "json" });
+          if (pm) pinned = { id: ch.pinnedMsg, kind: pm.kind, text: (pm.text || pm.name || "").slice(0, 80) };
+        }
+        return json({ status, pinned, flags: { pinned: !!(e && e.pinned), archived: !!(e && e.archived), locked: !!(e && e.locked) },
           blocked: ch.blockedBy ? (ch.blockedBy === me.id ? "me" : "them") : null, edits: ch.edits || {},
           with: other ? other.name || other.username : "Deleted account", peer: other ? pub(other) : null, otherRead: or ? or.t : 0, ids: all.slice(-100).map((k) => k.slice(b.length + 1)), messages });
       }
@@ -327,6 +375,16 @@ export default async (req) => {
         }
         return json({ ok: true });
       }
+      if (c === "info" && M === "GET") {
+        const e = await mine.get(`${me.id}/${b}`, { type: "json" });
+        return json({ locked: !!(e && e.locked) });
+      }
+      if (c === "pin" && M === "POST") {
+        const id = body.id ? String(body.id) : null;
+        if (id && !(await db("msgs").get(`${b}/${id}`, { type: "json" }))) return bad("Message not found.", 404);
+        await db("chats").setJSON(b, { ...ch, pinnedMsg: id });
+        return json({ ok: true });
+      }
       if (c === "typing" && M === "POST") {
         if (!me.hideActive) await db("typing").setJSON(`${b}/${me.id}`, { t: Date.now() });
         return json({ ok: true });
@@ -335,7 +393,8 @@ export default async (req) => {
         const k = `${me.id}/${b}`, e = await mine.get(k, { type: "json" });
         if (!e) return bad("No such chat.", 404);
         const n = { ...e };
-        for (const f of ["pinned", "archived"]) if (typeof body[f] === "boolean") n[f] = body[f];
+        if (body.locked === true && !me.lockPin) return bad("Set a lock PIN first.");
+        for (const f of ["pinned", "archived", "locked"]) if (typeof body[f] === "boolean") n[f] = body[f];
         await mine.setJSON(k, n);
         return json({ ok: true });
       }
@@ -350,6 +409,7 @@ export default async (req) => {
         if (!m || m.from !== me.id) return bad("You can only delete your own messages.", 403);
         await db("msgs").delete(`${b}/${id}`);
         await db("media").delete(`${b}/${id}`);
+        if (ch.pinnedMsg === id) await db("chats").setJSON(b, { ...ch, pinnedMsg: null });
         const { blobs } = await db("msgs").list({ prefix: b + "/" });
         const lastKey = blobs.map((x) => x.key).sort().pop();
         if (!lastKey || lastKey.slice(b.length + 1) < id) {

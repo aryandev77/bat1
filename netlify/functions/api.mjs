@@ -12,6 +12,7 @@ const sha = (s) => createHash("sha256").update(s).digest("hex");
 const rid = (n = 8) => randomBytes(n).toString("hex");
 const cookie = (v, age) => `bat_s=${v}; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=${age}`;
 const pub = (u) => ({ id: u.id, username: u.username, name: u.name || u.username, bio: u.bio || "", av: u.av || 0, at: u.at });
+const isAdmin = (n) => (process.env.ADMIN_CODENAMES || "").toLowerCase().split(",").map((x) => x.trim()).filter(Boolean).includes(String(n).toLowerCase());
 const newPin = () => String(randomInt(0, 10000)).padStart(4, "0");
 
 async function hash(s, salt = rid(16)) {
@@ -114,10 +115,11 @@ export default async (req) => {
     const me = await whoami(req);
     if (!me) return bad("Sign in first.", 401);
 
-    if (a === "me" && M === "GET") return json({ id: me.id, username: me.username, name: me.name || me.username, bio: me.bio || "", av: me.av || 0 });
+    if (a === "me" && M === "GET") return json({ id: me.id, username: me.username, name: me.name || me.username, bio: me.bio || "", av: me.av || 0, hideActive: !!me.hideActive, unameAt: me.unameAt || 0, admin: isAdmin(me.username) });
     if (a === "profile" && M === "POST") {
       me.bio = String(body.bio || "").slice(0, 80);
       if (typeof body.name === "string") me.name = body.name.trim().slice(0, 30) || me.username;
+      if (typeof body.hideActive === "boolean") me.hideActive = body.hideActive;
       await db("users").setJSON(me.id, me);
       return json({ ok: true });
     }
@@ -141,11 +143,45 @@ export default async (req) => {
       const nt = db("notes");
       for (const x of (await nt.list({ prefix: me.id + "/" })).blobs) await nt.delete(x.key);
       await db("avatars").delete(me.id);
+      await db("presence").delete(me.id);
       await db("names").delete(me.username.toLowerCase());
       await db("users").delete(me.id);
       return json({ ok: true }, 200, { "set-cookie": cookie("", 0) });
     }
 
+    if (a === "ping" && M === "POST") {
+      if (!me.hideActive) await db("presence").setJSON(me.id, { t: Date.now() });
+      return json({ ok: true });
+    }
+    if (a === "username" && M === "POST") {
+      const name = String(body.username || "").trim().replace(/^@/, "");
+      if (!/^[A-Za-z0-9_]{3,20}$/.test(name)) return bad("ID: 3 to 20 letters, numbers or _.");
+      if (name === me.username) return bad("That is already your ID.");
+      const wait = (me.unameAt || 0) + 17 * 864e5 - Date.now();
+      if (wait > 0) return bad(`You can change your ID again in ${Math.ceil(wait / 864e5)} day(s).`, 429);
+      const key = name.toLowerCase(), cur = me.username.toLowerCase();
+      const taken = await db("names").get(key, { type: "json" });
+      if (taken && taken.id !== me.id) return bad("That ID is taken.", 409);
+      if (key !== cur) { await db("names").setJSON(key, { id: me.id }); await db("names").delete(cur); }
+      me.username = name; me.unameAt = Date.now();
+      await db("users").setJSON(me.id, me);
+      return json({ username: name });
+    }
+    if (a === "feedback") {
+      const st = db("feedback");
+      if (!b && M === "POST") {
+        const t = String(body.text || "").trim().slice(0, 1000);
+        if (t.length < 3) return bad("Write a few words first.");
+        await st.setJSON(`${String(Date.now()).padStart(14, "0")}-${rid(3)}`, { from: me.username, uid: me.id, text: t, at: Date.now() });
+        return json({ ok: true });
+      }
+      if (!b && M === "GET") {
+        if (!isAdmin(me.username)) return bad("Not found.", 404);
+        const { blobs } = await st.list();
+        const rows = await Promise.all(blobs.map(async (x) => ({ id: x.key, ...(await st.get(x.key, { type: "json" })) })));
+        return json({ items: rows.sort((p, q) => q.at - p.at).slice(0, 50) });
+      }
+    }
     if (a === "user" && M === "GET") {
       const u = await db("users").get(String(b || ""), { type: "json" });
       return u ? json(pub(u)) : bad("User not found.", 404);
@@ -227,7 +263,7 @@ export default async (req) => {
           const u = await db("users").get(r.with.id, { type: "json" });
           return { ...r, with: u ? pub(u) : r.with };
         }));
-        return json({ chats: full.sort((p, q) => (q.at || 0) - (p.at || 0)) });
+        return json({ chats: full.sort((p, q) => (q.pinned ? 1 : 0) - (p.pinned ? 1 : 0) || (q.at || 0) - (p.at || 0)) });
       }
       if (!b && M === "POST") {
         const o = await db("users").get(String(body.userId || ""), { type: "json" });
@@ -241,6 +277,7 @@ export default async (req) => {
       const ch = await db("chats").get(b, { type: "json" });
       if (!ch || !ch.users.includes(me.id)) return bad("No such chat.", 404);
       const otherId = ch.users.find((u) => u !== me.id);
+      const blockedMsg = () => (ch.blockedBy === me.id ? "You blocked this person. Unblock to send messages." : "You can't send messages to this person.");
       const newId = () => `${String(Date.now()).padStart(14, "0")}-${rid(3)}`;
 
       const push = async (msg, preview, id = newId()) => {
@@ -250,7 +287,7 @@ export default async (req) => {
         const em = (await mine.get(mk, { type: "json" })) || { cid: b, with: { id: otherId, username: other ? other.username : "Deleted" } };
         await mine.setJSON(mk, { ...em, at: Date.now(), preview, unread: 0 });
         const eo = (await mine.get(ok, { type: "json" })) || { cid: b, with: { id: me.id, username: me.username }, unread: 0 };
-        await mine.setJSON(ok, { ...eo, at: Date.now(), preview, unread: (eo.unread || 0) + 1 });
+        await mine.setJSON(ok, { ...eo, at: Date.now(), preview, unread: (eo.unread || 0) + 1, archived: false });
       };
 
       if (c === "messages" && M === "GET") {
@@ -265,7 +302,47 @@ export default async (req) => {
         await db("reads").setJSON(`${me.id}/${b}`, { t: Date.now() });
         const mk = `${me.id}/${b}`, e = await mine.get(mk, { type: "json" });
         if (e && e.unread) await mine.setJSON(mk, { ...e, unread: 0 });
-        return json({ with: other ? other.name || other.username : "Deleted account", peer: other ? pub(other) : null, otherRead: or ? or.t : 0, ids: all.slice(-100).map((k) => k.slice(b.length + 1)), messages });
+        let status = null;
+        if (other && !me.hideActive && !other.hideActive) {
+          const pr = await db("presence").get(otherId, { type: "json" });
+          const ty = await db("typing").get(`${b}/${otherId}`, { type: "json" });
+          status = { last: pr ? pr.t : 0, typing: !!ty && Date.now() - ty.t < 5000 };
+        }
+        return json({ status, flags: { pinned: !!(e && e.pinned), archived: !!(e && e.archived) },
+          blocked: ch.blockedBy ? (ch.blockedBy === me.id ? "me" : "them") : null, edits: ch.edits || {},
+          with: other ? other.name || other.username : "Deleted account", peer: other ? pub(other) : null, otherRead: or ? or.t : 0, ids: all.slice(-100).map((k) => k.slice(b.length + 1)), messages });
+      }
+      if (c === "edit" && M === "POST") {
+        const id = String(body.id || ""), t = String(body.text || "").trim().slice(0, 4000);
+        const m = await db("msgs").get(`${b}/${id}`, { type: "json" });
+        if (!m || m.from !== me.id || m.kind !== "text") return bad("You can only edit your own text messages.", 403);
+        if (!t) return bad("A message cannot be empty.");
+        await db("msgs").setJSON(`${b}/${id}`, { ...m, text: t, edited: true });
+        const keep = Object.entries({ ...(ch.edits || {}), [id]: { text: t, t: Date.now() } }).sort((p, q) => q[1].t - p[1].t).slice(0, 20);
+        await db("chats").setJSON(b, { ...ch, edits: Object.fromEntries(keep) });
+        const { blobs } = await db("msgs").list({ prefix: b + "/" });
+        const lastKey = blobs.map((x) => x.key).sort().pop();
+        if (lastKey && lastKey.slice(b.length + 1) === id) {
+          for (const u of ch.users) { const k = `${u}/${b}`, e = await mine.get(k, { type: "json" }); if (e) await mine.setJSON(k, { ...e, preview: t.slice(0, 60) }); }
+        }
+        return json({ ok: true });
+      }
+      if (c === "typing" && M === "POST") {
+        if (!me.hideActive) await db("typing").setJSON(`${b}/${me.id}`, { t: Date.now() });
+        return json({ ok: true });
+      }
+      if (c === "flags" && M === "POST") {
+        const k = `${me.id}/${b}`, e = await mine.get(k, { type: "json" });
+        if (!e) return bad("No such chat.", 404);
+        const n = { ...e };
+        for (const f of ["pinned", "archived"]) if (typeof body[f] === "boolean") n[f] = body[f];
+        await mine.setJSON(k, n);
+        return json({ ok: true });
+      }
+      if (c === "block" && M === "POST") {
+        if (body.blocked) await db("chats").setJSON(b, { ...ch, blockedBy: ch.blockedBy || me.id });
+        else if (ch.blockedBy === me.id) await db("chats").setJSON(b, { ...ch, blockedBy: null });
+        return json({ ok: true });
       }
       if (c === "delete" && M === "POST") {
         const id = String(body.id || "");
@@ -284,12 +361,14 @@ export default async (req) => {
         return json({ ok: true });
       }
       if (c === "send" && M === "POST") {
+        if (ch.blockedBy) return bad(blockedMsg(), 403);
         const t = String(body.text || "").trim().slice(0, 4000);
         if (!t) return bad("Empty message.");
         await push({ kind: "text", text: t }, t.slice(0, 60));
         return json({ ok: true });
       }
       if (upload && M === "POST") {
+        if (ch.blockedBy) return bad(blockedMsg(), 403);
         const kind = url.searchParams.get("kind");
         const name = (url.searchParams.get("name") || "file").replace(/[^\w.\- ]/g, "_").slice(0, 80);
         const type = (req.headers.get("content-type") || "").split(";")[0];

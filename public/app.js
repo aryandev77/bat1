@@ -1,9 +1,16 @@
+import { qrSvg } from "/qr.js";
+import { startTranslator, setLang, getLang, LANGS } from "/i18n.js";
 const app = document.getElementById("app");
 let me = null, timer = null;
 const applyTheme = () => { document.documentElement.dataset.theme = localStorage.getItem("bat.theme") || "default"; };
 applyTheme();
-// Add more lines about the creator here; each string becomes a paragraph on the "About the creator" page.
-const CREATOR_MORE = [];
+const CREATOR = [
+  "Aryan Pal is the founder, developer and creator of BAT.",
+  "He built BAT end to end — the idea, the design, the front end and the entire server — with one goal: give a small circle of people a private place to talk, without handing their email, phone number or contacts to anyone.",
+  "Aryan also created VAANI, an AI-powered language and culture bridge that translates real conversations while preserving tone, emotion and cultural context — the parts that ordinary translators flatten.",
+  "He works alone, ships fast, and treats every product as a craft. BAT and VAANI are the first two; more are on the way.",
+];
+const goHome = () => { if (!/^#\/u\//.test(location.hash)) goHome(); };
 
 const h = (tag, attrs = {}, ...kids) => {
   const e = document.createElement(tag);
@@ -42,6 +49,14 @@ const ICON = {
   pin: '<path d="M9 4h6l-1 6 3 3H7l3-3zM12 13v7"/>',
   archive: '<path d="M4 6h16v4H4zM6 10v9h12v-9M10 14h4"/>',
   check: '<path d="M5 12l5 5L20 7"/>',
+  instagram: '<rect x="2" y="2" width="20" height="20" rx="5" ry="5"/><path d="M16 11.37A4 4 0 1 1 12.63 8 4 4 0 0 1 16 11.37z"/><line x1="17.5" y1="6.5" x2="17.51" y2="6.5"/>',
+  github: '<path d="M9 19c-5 1.5-5-2.5-7-3m14 6v-3.87a3.37 3.37 0 0 0-.94-2.61c3.14-.35 6.44-1.54 6.44-7A5.44 5.44 0 0 0 20 4.77 5.07 5.07 0 0 0 19.91 1S18.73.65 16 2.48a13.38 13.38 0 0 0-7 0C6.27.65 5.09 1 5.09 1A5.07 5.07 0 0 0 5 4.77a5.44 5.44 0 0 0-1.5 3.78c0 5.42 3.3 6.61 6.44 7A3.37 3.37 0 0 0 9 18.13V22"/>',
+  x: '<path d="M4 4l16 16M20 4L4 20"/>',
+  youtube: '<path d="M22.54 6.42a2.78 2.78 0 0 0-1.94-2C18.88 4 12 4 12 4s-6.88 0-8.6.46a2.78 2.78 0 0 0-1.94 2A29 29 0 0 0 1 11.75a29 29 0 0 0 .46 5.33A2.78 2.78 0 0 0 3.4 19c1.72.46 8.6.46 8.6.46s6.88 0 8.6-.46a2.78 2.78 0 0 0 1.94-2 29 29 0 0 0 .46-5.25 29 29 0 0 0-.46-5.33z"/><polygon points="9.75 15.02 15.5 11.75 9.75 8.48 9.75 15.02"/>',
+  linkedin: '<path d="M16 8a6 6 0 0 1 6 6v7h-4v-7a2 2 0 0 0-2-2 2 2 0 0 0-2 2v7h-4v-7a6 6 0 0 1 6-6z"/><rect x="2" y="9" width="4" height="12"/><circle cx="4" cy="4" r="2"/>',
+  qr: '<path d="M4 4h6v6H4zM14 4h6v6h-6zM4 14h6v6H4z"/><path d="M14 14h2v2h-2zM18 14h2M14 18h2M18 18h2v2"/>',
+  scan: '<path d="M4 8V5a1 1 0 011-1h3M16 4h3a1 1 0 011 1v3M20 16v3a1 1 0 01-1 1h-3M8 20H5a1 1 0 01-1-1v-3M4 12h16"/>',
+  globe: '<circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c3 3 3 15 0 18M12 3c-3 3-3 15 0 18"/>',
   doc: '<path d="M6 3h9l3 3v15H6z"/><path d="M9 11h6M9 15h6"/>',
   note: '<path d="M5 4h14v16H5z"/><path d="M8 9h8M8 13h8M8 17h5"/>',
   book: '<path d="M4 5a2 2 0 012-2h13v16H6a2 2 0 00-2 2z"/><path d="M4 19V5"/>',
@@ -143,7 +158,7 @@ function authView(mode = "login") {
       const r = await api({ login: "login", register: "signup", forgot: "reset" }[mode], "POST", body);
       me = await api("me");
       if (r.recovery) return recoveryView(r.recovery);
-      location.hash = "#/"; route();
+      goHome();
     } catch (x) { err.textContent = x.message; }
   };
   const hero = h("div", { class: "hero" }, h("i", { class: "ray r1" }), h("i", { class: "ray r2" }), h("i", { class: "ray r3" }), h("div", { class: "tile" }, logo()));
@@ -166,8 +181,8 @@ function recoveryView(pin) {
 async function chatsView(archived = false) {
   const list = h("div");
   const row = (c) => h("a", { class: "row", href: "#/c/" + c.cid }, pic(c.with),
-    h("div", { class: "mid" }, h("b", {}, c.with.name || c.with.username), h("span", {}, c.preview || "No messages yet")),
-    h("div", { class: "end" }, h("time", {}, c.preview ? stamp(c.at) : ""), c.unread ? h("i", { class: "badge" }, String(c.unread)) : c.pinned ? icon("pin") : null));
+    h("div", { class: "mid" }, h("b", { "data-u": "" }, c.with.name || c.with.username), h("span", c.preview && !c.locked ? { "data-u": "" } : {}, c.preview || "No messages yet")),
+    h("div", { class: "end" }, h("time", {}, c.preview ? stamp(c.at) : ""), c.unread ? h("i", { class: "badge" }, String(c.unread)) : c.locked ? icon("lock") : c.pinned ? icon("pin") : null));
   const load = async () => {
     const { chats } = await api("chats");
     const rows = chats.filter((c) => !!c.archived === archived).map(row), arch = chats.filter((c) => c.archived);
@@ -189,7 +204,7 @@ function searchView() {
     const { cid } = await api("chats", "POST", { userId: u.id }); location.hash = "#/c/" + cid;
   };
   const urow = (u) => h("button", { class: "row", onclick: () => open(u).catch((e) => alert(e.message)) }, pic(u),
-    h("div", { class: "mid" }, h("b", {}, u.name), h("span", {}, "@" + u.username + (u.bio ? "  ·  " + u.bio : ""))));
+    h("div", { class: "mid" }, h("b", { "data-u": "" }, u.name), h("span", { "data-u": "" }, "@" + u.username + (u.bio ? "  ·  " + u.bio : ""))));
   const showHist = () => {
     const hs = hist();
     out.replaceChildren(...(hs.length ? [h("div", { class: "histhead" }, h("span", {}, "Recent searches"), h("button", { class: "link", onclick: () => { localStorage.removeItem("bat.hist"); showHist(); } }, "Clear")), ...hs.map(urow)]
@@ -207,7 +222,8 @@ function searchView() {
       } catch (e) { out.replaceChildren(h("p", { class: "empty" }, e.message)); }
     }, 250);
   };
-  view(bar(h("b", {}, "Search")), main(q.w, out), nav("#/search"));
+  const qa = (ic, t, href) => h("a", { href }, icon(ic), h("span", {}, t));
+  view(bar(h("b", {}, "Search")), main(q.w, h("div", { class: "quick" }, qa("qr", "My code", "#/code"), qa("scan", "Scan code", "#/scan")), out), nav("#/search"));
   showHist(); q.i.focus();
 }
 
@@ -219,15 +235,57 @@ async function shrink(f, max = 1600) {
   return new Promise((r) => c.toBlob(r, "image/jpeg", 0.82));
 }
 
+function pinPopup() {
+  return new Promise((resolve) => {
+    const err = h("p", { class: "err" });
+    const f = (ph) => { const x = field("lock", ph, "password"); x.i.inputMode = "numeric"; x.i.maxLength = 8; return x; };
+    const cur = me.hasLockPin ? f("Current PIN") : null, nw = f("New PIN (4 to 8 digits)");
+    const done = (v) => { bk.remove(); resolve(v); };
+    const bk = popup(h("p", { class: "mute" }, "Chat lock PIN"), ...(cur ? [cur.w] : []), nw.w, err, h("div", { class: "row2" },
+      h("button", { class: "sbtn", onclick: () => done(false) }, "Cancel"),
+      h("button", { class: "sbtn primary", onclick: async () => {
+        try { await api("lockpin", "POST", { pin: nw.i.value, old: cur ? cur.i.value : undefined }); me.hasLockPin = true; done(true); }
+        catch (e) { err.textContent = e.message; }
+      } }, "Save")));
+    (cur || nw).i.focus();
+  });
+}
+function pinEntryView(cid) {
+  const pin = field("lock", "PIN", "password"); pin.i.inputMode = "numeric"; pin.i.maxLength = 8;
+  const err = h("p", { class: "err center" });
+  const go = async () => {
+    try { await api("lockpin/verify", "POST", { pin: pin.i.value }); sessionStorage.setItem("bat.unl." + cid, "1"); route(); }
+    catch (e) { err.textContent = e.message; pin.i.value = ""; }
+  };
+  pin.i.onkeydown = (e) => { if (e.key === "Enter") go(); };
+  view(bar(back("#/"), h("b", {}, "Locked chat"), h("span")), main(h("div", { class: "auth lockbox" },
+    h("div", { class: "lockic" }, icon("lock")), h("p", { class: "mute center" }, "Enter your PIN to open this chat."), pin.w, err,
+    h("button", { class: "btn", onclick: go }, "Unlock"))));
+  pin.i.focus();
+}
+async function chatGate(cid) {
+  if (sessionStorage.getItem("bat.unl." + cid)) return true;
+  if (!(await api(`chats/${cid}/info`)).locked) return true;
+  pinEntryView(cid);
+  return false;
+}
+
 async function chatView(cid) {
   const box = h("div", { class: "msgs" }), err = h("p", { class: "err" });
   const scroller = main(box, err);
-  const title = h("b", {}, "…"), sub = h("small", {}), avatar = h("span", { class: "av" }, "?");
+  const title = h("b", { "data-u": "" }, "…"), sub = h("small", {}), avatar = h("span", { class: "av" }, "?");
+  const pinbar = h("div", { class: "pinbar", hidden: "" });
+  const paintPin = (p) => {
+    pinbar.hidden = !p;
+    if (!p) return;
+    pinbar.replaceChildren(icon("pin"), h("div", { class: "mid" }, h("b", {}, "Pinned message"), h("span", { "data-u": "" }, p.text || (p.kind === "photo" ? "Photo" : p.kind === "voice" ? "Voice message" : "File"))));
+    pinbar.onclick = () => { const e = els.get(p.id); if (e) e.el.scrollIntoView({ block: "center" }); };
+  };
   const text = h("textarea", { rows: "1", placeholder: "Type a message", "aria-label": "Message" });
   const file = h("input", { type: "file", hidden: "" });
   const banner = h("div", { class: "blockbar", hidden: "" }, h("span", {}, "You blocked this person."),
     h("button", { class: "link", onclick: async () => { await api(`chats/${cid}/block`, "POST", { blocked: false }); pull(); } }, "Unblock"));
-  const els = new Map(), meta = { flags: {}, blocked: null, peer: null };
+  const els = new Map(), meta = { flags: {}, blocked: null, peer: null, pinned: null };
   let last = "", otherRead = 0, rec = null, lastTyping = 0;
   const toEnd = () => { scroller.scrollTop = scroller.scrollHeight; };
 
@@ -250,6 +308,9 @@ async function chatView(cid) {
       if (!confirm("Delete this message?")) return;
       await api(`chats/${cid}/delete`, "POST", { id: m.id }); ent.el.remove(); els.delete(m.id);
     }, "danger"]);
+    rows.push([meta.pinned && meta.pinned.id === m.id ? "Unpin message" : "Pin message", async () => {
+      await api(`chats/${cid}/pin`, "POST", { id: meta.pinned && meta.pinned.id === m.id ? null : m.id }); await pull();
+    }]);
     if (rows.length) sheet(rows);
   };
   const draw = (m) => {
@@ -267,7 +328,7 @@ async function chatView(cid) {
   async function pull() {
     const d = await api(`chats/${cid}/messages?after=${encodeURIComponent(last)}`);
     title.textContent = d.with; otherRead = d.otherRead; sub.textContent = statusText(d.status);
-    Object.assign(meta, { flags: d.flags, blocked: d.blocked, peer: d.peer });
+    Object.assign(meta, { flags: d.flags, blocked: d.blocked, peer: d.peer, pinned: d.pinned }); paintPin(d.pinned);
     if (d.peer && !avatar.dataset.p) { avatar.dataset.p = "1"; avatar.replaceChildren(...pic(d.peer).childNodes); }
     banner.hidden = d.blocked !== "me"; text.disabled = d.blocked === "me";
     const near = !last || scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight < 160;
@@ -326,6 +387,12 @@ async function chatView(cid) {
     sheet([
       ...(meta.peer ? [["View profile", () => { location.hash = "#/u/" + meta.peer.id; }]] : []),
       [f.pinned ? "Unpin chat" : "Pin chat", async () => { await api(`chats/${cid}/flags`, "POST", { pinned: !f.pinned }); await pull(); }],
+      [f.locked ? "Unlock chat" : "Lock chat", async () => {
+        if (!f.locked && !(me.hasLockPin || (await pinPopup()))) return;
+        await api(`chats/${cid}/flags`, "POST", { locked: !f.locked });
+        if (!f.locked) sessionStorage.setItem("bat.unl." + cid, "1");
+        await pull();
+      }],
       [f.archived ? "Unarchive chat" : "Archive chat", async () => { await api(`chats/${cid}/flags`, "POST", { archived: !f.archived }); if (!f.archived) location.hash = "#/"; else await pull(); }],
       [blockedByMe ? "Unblock" : "Block", async () => {
         if (!blockedByMe && !confirm("Block this person? They will not be able to message you.")) return;
@@ -334,7 +401,7 @@ async function chatView(cid) {
     ]);
   };
   const avBtn = h("button", { class: "hav", "aria-label": "Open profile", onclick: () => { if (meta.peer) location.hash = "#/u/" + meta.peer.id; } }, avatar);
-  view(bar(back("#/"), h("div", { class: "who", onclick: chatMenu }, title, sub), avBtn), scroller, banner,
+  view(bar(back("#/"), h("div", { class: "who", onclick: chatMenu }, title, sub), avBtn), pinbar, scroller, banner,
     h("div", { class: "composer" }, h("div", { class: "in" },
       h("button", { class: "ibtn", "aria-label": "Attach", onclick: () => file.click() }, icon("clip")), file, text, mic,
       h("button", { class: "ibtn", "aria-label": "Send", onclick: sendText }, icon("send")))));
@@ -360,6 +427,11 @@ async function shrinkSquare(f, px = 320) {
   return new Promise((r) => c.toBlob(r, "image/jpeg", 0.85));
 }
 
+const SOC = { instagram: ["Instagram", (v) => `https://instagram.com/${v}`], github: ["GitHub", (v) => `https://github.com/${v}`], x: ["X", (v) => `https://x.com/${v}`], youtube: ["YouTube", (v) => `https://youtube.com/@${v}`], linkedin: ["LinkedIn", (v) => `https://linkedin.com/in/${v}`] };
+const socials = (links = {}) => {
+  const a = Object.entries(SOC).filter(([k]) => links[k]).map(([k, [label, url]]) => h("a", { class: "soc", href: url(links[k]), target: "_blank", rel: "noopener noreferrer", "aria-label": label, title: label }, icon(k)));
+  return a.length ? h("div", { class: "socs" }, ...a) : null;
+};
 async function profileView(id) {
   const u = await api("user/" + id), own = u.id === me.id;
   const btn = h("button", { class: "pbtn", onclick: own ? () => { location.hash = "#/edit"; } : async () => {
@@ -367,9 +439,9 @@ async function profileView(id) {
   } }, own ? "Edit profile" : "Message");
   view(bar(back(own ? "#/settings" : "#/search"), h("b", {}, "Profile"), h("span")),
     main(h("div", { class: "pwrap" }, h("div", { class: "pcard" }, h("div", { class: "pcover" }, logo()),
-      h("div", { class: "pmain" }, h("div", { class: "prow" }, tapPic(u), btn),
-        h("h2", { class: "pname" }, u.name), h("p", { class: "phandle" }, "@" + u.username),
-        u.bio ? h("p", { class: "pbio" }, u.bio) : null,
+      h("div", { class: "pmain" }, h("div", { class: "prow" }, tapPic(u), h("div", { class: "pact" }, own ? h("button", { class: "pqr", "aria-label": "My code", onclick: () => { location.hash = "#/code"; } }, icon("qr")) : null, btn)),
+        h("h2", { class: "pname", "data-u": "" }, u.name), h("p", { class: "phandle", "data-u": "" }, "@" + u.username),
+        u.bio ? h("p", { class: "pbio", "data-u": "" }, u.bio) : null, socials(u.links),
         h("div", { class: "pstats" }, h("b", {}, "Joined"), h("span", {}, new Date(u.at).toLocaleDateString([], { month: "short", year: "numeric" }))))))),
     nav(own ? "#/settings" : "#/search"));
 }
@@ -394,6 +466,7 @@ async function editView() {
   const next = (m.unameAt || 0) + 17 * 864e5, locked = next > Date.now();
   un.i.disabled = locked;
   const act = (fn, ok) => async () => { try { await fn(); say(ok); } catch (e) { say(e.message); } };
+  const ln = [["instagram", "Instagram"], ["github", "GitHub"], ["x", "X (Twitter)"], ["youtube", "YouTube"], ["linkedin", "LinkedIn"]].map(([k, l]) => { const f = field(k, l); f.i.value = (m.links || {})[k] || ""; f.i.maxLength = 120; return [k, f]; });
   view(bar(back("#/settings"), h("b", {}, "Edit profile"), h("span")), main(h("div", { class: "auth" },
     holder, h("button", { class: "btn ghost", onclick: () => file.click() }, "Change photo"), file,
     m.av ? h("p", { class: "mid-link" }, h("button", { class: "link", onclick: act(async () => { await api("avatar/remove", "POST", {}); m.av = 0; paint(); }, "Photo removed.") }, "Remove photo")) : null,
@@ -404,7 +477,10 @@ async function editView() {
     h("button", { class: "btn ghost", ...(locked ? { disabled: "" } : {}), onclick: async () => {
       if (!confirm("Change your ID to @" + un.i.value.trim().replace(/^@/, "") + "? You can't change it again for 17 days.")) return;
       try { const r = await api("username", "POST", { username: un.i.value }); me.username = r.username; await editView(); } catch (e) { say(e.message); }
-    } }, "Change ID"))));
+    } }, "Change ID"),
+    h("span", { class: "cap" }, "Links on your profile"), ...ln.map(([, f]) => f.w),
+    h("p", { class: "note" }, "Enter your handle or paste the link."),
+    h("button", { class: "btn ghost", onclick: act(() => api("profile", "POST", { links: Object.fromEntries(ln.map(([k, f]) => [k, f.i.value])) }), "Links saved.") }, "Save links"))));
 }
 
 const fmtDate = (t) => new Date(t).toLocaleDateString([], { weekday: "long", day: "numeric", month: "long", year: "numeric" });
@@ -477,7 +553,6 @@ const PAGES = {
   storage: ["Data & Storage", ["Photos, files and voice messages are saved on the server.", "Each file can be up to 5 MB.", "Deleting a message also deletes its file.", "Deleting your account deletes your chats."]],
   help: ["Help & Support", ["Forgot your password? On the login screen tap Forgot Password, then enter your username, your 4-digit recovery code and a new password.", "After 5 wrong codes the reset is locked for an hour.", "If you lost both your password and your code, the account cannot be recovered.", "For anything else, contact Aryan Pal."]],
   about: ["About BAT", ["BAT stands for Black Anonymous Telegram.", "It is a private messenger for a small circle of people: find a username, chat, and share photos, files and voice messages.", "Version 1.0"]],
-  creator: ["About the creator", ["Aryan Pal is the founder and creator of BAT.", "He designed the look, chose the name and built BAT for his close friends, one version at a time. It started as a spy-style idea for passing secrets around and slowly turned into a clean, simple messenger.", ...CREATOR_MORE]],
   policy: ["Privacy policy", ["BAT is a private app for invited people.", "What we store: your username, a hashed password, a hashed recovery code, an optional bio, your chats with their messages and files, and the time each message was sent.", "What we do not collect: email, phone number, contacts, location, ads or analytics.", "We use one session cookie to keep you signed in.", "BAT does not use end-to-end encryption, and messages are stored on BAT's server. Aryan Pal, who runs BAT, has promised not to read them.", "You can delete any of your messages, and you can delete your account in Settings, which removes your chats."]],
   terms: ["Terms", ["Use BAT respectfully.", "Do not use it for anything illegal or to harass others.", "The creator can remove accounts that break these rules.", "BAT is provided as it is, with no guarantees."]],
 };
@@ -495,6 +570,8 @@ async function privacyView() {
   };
   view(bar(back("#/settings"), h("b", {}, "Privacy & Security"), h("span")), main(
     h("label", { class: "chk" }, box, h("div", { class: "mid" }, h("b", {}, "Show when I'm active"), h("span", {}, "If you turn this off, you also won't see when others are active or typing."))),
+    h("button", { class: "row", onclick: async () => { if (await pinPopup()) privacyView(); } }, icon("lock"),
+      h("div", { class: "mid" }, h("b", {}, "Chat lock PIN"), h("span", {}, m.hasLockPin ? "Change your PIN" : "Set a PIN to lock chats"))),
     h("div", { class: "page" }, ...PAGES["privacy-security"][1].map((x) => h("p", {}, x)))));
 }
 
@@ -531,17 +608,94 @@ async function inboxView() {
     : [h("p", { class: "empty" }, "No feedback yet.")])));
 }
 
+async function storageView() {
+  const d = await api("library");
+  let tab = "all";
+  const mb = (n) => (n < 1e6 ? Math.max(1, Math.round(n / 1e3)) + " KB" : (n / 1e6).toFixed(1) + " MB");
+  const url = (x) => `/api/media/${x.cid}/${x.id}`, who = (x) => (x.mine ? "You to " : "From ") + x.with + " · " + stamp(x.at);
+  const list = h("div"), seg = h("div", { class: "seg" });
+  const paint = () => {
+    const items = d.items.filter((x) => tab === "all" || x.kind === tab), photos = items.filter((x) => x.kind === "photo");
+    seg.replaceChildren(...[["all", "All"], ["photo", "Photos"], ["file", "Files"], ["voice", "Voice"]].map(([k, t]) =>
+      h("button", { class: tab === k ? "on" : "", onclick: () => { tab = k; paint(); } }, t)));
+    list.replaceChildren(
+      ...(photos.length ? [h("div", { class: "grid" }, ...photos.map((x) => h("a", { class: "cell", href: url(x), target: "_blank", rel: "noopener" }, h("img", { src: url(x), alt: "Photo", loading: "lazy" }))))] : []),
+      ...items.filter((x) => x.kind !== "photo").map((x) => x.kind === "voice"
+        ? h("div", { class: "libvoice" }, h("div", { class: "mid" }, h("b", {}, "Voice message"), h("span", {}, who(x))), h("audio", { controls: "", preload: "none", src: url(x) }))
+        : h("a", { class: "row", href: url(x), download: x.name }, icon("doc"), h("div", { class: "mid" }, h("b", { "data-u": "" }, x.name), h("span", {}, who(x) + " · " + mb(x.size))))),
+      ...(items.length ? [] : [h("p", { class: "empty" }, "Nothing here yet. Photos, files and voice messages you share or receive will appear here.")]));
+  };
+  paint();
+  view(bar(back("#/settings"), h("b", {}, "Data & Storage"), h("span")), main(h("p", { class: "libsum" }, `${d.count} ${d.count === 1 ? "item" : "items"} · ${mb(d.total)}`), seg, list,
+    h("p", { class: "libsum" }, "Media from locked chats isn't shown.")));
+}
+
+function languageView() {
+  const list = h("div");
+  const paint = () => list.replaceChildren(...Object.entries(LANGS).map(([k, t]) =>
+    h("button", { class: "row", onclick: () => { setLang(k); route(); } }, h("div", { class: "mid" }, h("b", { "data-u": "" }, t)), getLang() === k ? icon("check") : null)));
+  paint();
+  view(bar(back("#/settings"), h("b", {}, "Language"), h("span")), main(list));
+}
+
+async function codeView() {
+  const m = await api("me"), url = `${location.origin}/#/u/${m.id}`;
+  let card;
+  try { card = h("div", { class: "qrcard" }, qrSvg(url)); } catch { card = h("p", { class: "empty" }, "Your link is too long for a QR code."); }
+  const copy = h("button", { class: "btn", onclick: async () => { await navigator.clipboard.writeText(url); copy.textContent = "Copied"; } }, "Copy my link");
+  view(bar(back("#/search"), h("b", {}, "My code"), h("span")), main(h("div", { class: "qrwrap" }, card,
+    h("h2", { class: "qrname", "data-u": "" }, m.name), h("p", { class: "hand", "data-u": "" }, "@" + m.username),
+    h("p", { class: "note center" }, "Friends can scan this code to open your profile and message you."), copy,
+    h("button", { class: "btn ghost", onclick: () => { location.hash = "#/scan"; } }, "Scan a code"))));
+}
+
+async function scanView() {
+  const msg = h("p", { class: "note center" }, "Point the camera at a BAT code.");
+  const video = h("video", { class: "scanv", playsinline: "", muted: "" });
+  let stream = null, stop = false;
+  const cleanup = () => { stop = true; if (stream) stream.getTracks().forEach((t) => t.stop()); };
+  window.addEventListener("hashchange", cleanup, { once: true });
+  view(bar(back("#/search"), h("b", {}, "Scan code"), h("span")), main(h("div", { class: "qrwrap" }, h("div", { class: "scanbox" }, video), msg,
+    h("button", { class: "btn ghost", onclick: () => { location.hash = "#/code"; } }, "My code"))));
+  if (!("BarcodeDetector" in window)) { msg.textContent = "This browser can't scan codes inside BAT. Open your phone's camera app and point it at the code. It opens BAT for you."; return; }
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } });
+    video.srcObject = stream; video.muted = true; await video.play();
+    const det = new BarcodeDetector({ formats: ["qr_code"] });
+    const tick = async () => {
+      if (stop) return;
+      try {
+        const hit = (await det.detect(video)).map((x) => /#\/u\/([a-f0-9]{16})/.exec(x.rawValue)).find(Boolean);
+        if (hit) { cleanup(); location.hash = "#/u/" + hit[1]; return; }
+      } catch { /* keep scanning */ }
+      setTimeout(tick, 300);
+    };
+    tick();
+  } catch { msg.textContent = "Camera is not allowed. Allow camera access and try again."; }
+}
+
+function creatorView() {
+  view(bar(back("#/settings"), h("b", {}, "About the creator"), h("span")), main(h("div", { class: "creator" },
+    h("span", { class: "av xl" }, "A"), h("h2", { "data-u": "" }, "Aryan Pal"), h("p", { class: "role", "data-u": "" }, "Founder · Developer · Creator"),
+    ...CREATOR.map((t) => h("p", { "data-u": "" }, t)))));
+}
+
+const groupLabel = (t) => h("div", { class: "sgroup" }, t);
 async function settingsView() {
   const m = await api("me");
   const theme = { default: "Default", dark: "Dark", light: "Light" }[localStorage.getItem("bat.theme") || "default"];
   view(bar(h("b", {}, "Settings")), main(
-    h("a", { class: "profile", href: "#/u/" + m.id }, pic(m, "xl"), h("h2", {}, m.name), h("span", { class: "hand" }, "@" + m.username)),
+    h("a", { class: "profile", href: "#/u/" + m.id }, pic(m, "xl"), h("h2", { "data-u": "" }, m.name), h("span", { class: "hand", "data-u": "" }, "@" + m.username)),
+    groupLabel("Account"),
     menuItem("user", "Edit profile", "Photo, name, ID, bio", "#/edit"),
     menuItem("user", "Account", "Password, recovery code", "#/account"),
     menuItem("shield", "Privacy & Security", "Active status, how your data is handled", "#/p/privacy-security"),
+    groupLabel("Preferences"),
     menuItem("moon", "Appearance", theme, "#/p/appearance"),
+    menuItem("globe", "Language", LANGS[getLang()], "#/p/language"),
     menuItem("bell", "Notifications", "Message alerts", "#/p/notifications"),
-    menuItem("box", "Data & Storage", "Files and media", "#/p/storage"),
+    menuItem("box", "Data & Storage", "Photos, files and voice you shared or received", "#/p/storage"),
+    groupLabel("Support"),
     menuItem("help", "Help & feedback", "Policy, terms, help, feedback", "#/help"),
     menuItem("info", "About BAT", "", "#/p/about"),
     menuItem("user", "About the creator", "", "#/p/creator"),
@@ -574,9 +728,12 @@ async function route() {
     if (loc === "#/notes") return await notesView();
     if (nb) return await browseView(+nb[1]);
     if (ne) return await noteEdit(ne[1]);
-    if (c) return await chatView(c[1]);
-    if (pg) { if (pg[1] === "privacy-security") return await privacyView(); if (pg[1] === "appearance") return appearanceView(); return pageView(pg[1]); }
+    if (loc === "#/" || loc === "#/archived") Object.keys(sessionStorage).filter((k) => k.startsWith("bat.unl.")).forEach((k) => sessionStorage.removeItem(k));
+    if (c) { if (!(await chatGate(c[1]))) return; return await chatView(c[1]); }
+    if (pg) { if (pg[1] === "privacy-security") return await privacyView(); if (pg[1] === "appearance") return appearanceView(); if (pg[1] === "storage") return await storageView(); if (pg[1] === "language") return languageView(); if (pg[1] === "creator") return creatorView(); return pageView(pg[1]); }
     if (loc === "#/archived") return await chatsView(true);
+    if (loc === "#/code") return await codeView();
+    if (loc === "#/scan") return await scanView();
     if (loc === "#/help") return helpView();
     if (loc === "#/feedback") return feedbackView();
     if (loc === "#/inbox") return await inboxView();
@@ -591,6 +748,7 @@ async function route() {
 }
 
 splash();
+startTranslator(app);
 window.addEventListener("hashchange", route);
 const ping = () => { if (me && !me.hideActive && !document.hidden) api("ping", "POST", {}).catch(() => {}); };
 setInterval(ping, 25000);

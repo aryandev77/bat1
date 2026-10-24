@@ -174,3 +174,49 @@ svg[viewBox="0 0 200 90"] { display: block; width: 100%; height: auto; }
 .panelrow { padding: .8rem 1rem; border-bottom: 1px solid var(--line); }
 .panelrow small { color: var(--mute); } .panelrow p { margin: .2rem 0 0; white-space: pre-wrap; }
 :root[data-theme="light"] .btn:hover { border-color: var(--ink); }
+
+/* batch B: alignment, groups, library, QR, social, lock */
+header.bar { min-height: 3.5rem; }
+header.bar > b:not(:only-child) { flex: 1; text-align: center; }
+header.bar span:empty { width: 2.4rem; flex: none; }
+.sgroup { padding: 1.1rem 1rem .35rem; color: var(--mute); font: 600 .7rem system-ui, sans-serif; letter-spacing: .1em; text-transform: uppercase; }
+.item, .row { min-height: 3.4rem; }
+.item .mid span, .row .mid span { margin-top: .05rem; }
+.center { text-align: center; }
+.quick { display: flex; gap: .6rem; padding: 0 1rem .6rem; }
+.quick a { flex: 1; display: flex; align-items: center; justify-content: center; gap: .5rem; padding: .7rem; border: 1px solid var(--line2); border-radius: .8rem; color: var(--ink); text-decoration: none; font-size: .9rem; }
+.quick a:hover { background: var(--hover); }
+.pact { display: flex; align-items: center; gap: .5rem; margin-top: .6rem; }
+.pact .pbtn { margin-top: 0; }
+.pqr { width: 2.7rem; height: 2.7rem; border-radius: 50%; border: 1px solid #d6d6d2; background: #fff; color: #0b0b0c; display: grid; place-items: center; cursor: pointer; }
+.socs { display: flex; gap: .6rem; margin-top: 1rem; }
+.soc { width: 2.5rem; height: 2.5rem; border-radius: 50%; background: #0b0b0c; color: #fff; display: grid; place-items: center; }
+.soc .ic { width: 1.15rem; height: 1.15rem; }
+.seg { display: flex; gap: .4rem; padding: .8rem 1rem; }
+.seg button { flex: 1; padding: .5rem 0; border: 1px solid var(--line2); border-radius: 2rem; background: none; color: var(--mute); font: 500 .82rem system-ui, sans-serif; cursor: pointer; }
+.seg button.on { background: var(--ink); color: var(--bg); border-color: var(--ink); }
+.libsum { padding: 0 1rem .4rem; color: var(--mute); font-size: .82rem; margin: 0; }
+.grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 2px; padding: 0 0 1rem; }
+.cell { aspect-ratio: 1; background: var(--panel2); overflow: hidden; }
+.cell img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.libvoice { display: flex; flex-direction: column; gap: .4rem; padding: .8rem 1rem; border-bottom: 1px solid var(--line); }
+.libvoice audio { width: 100%; height: 2.4rem; }
+.qrwrap { padding: 1.4rem; display: flex; flex-direction: column; align-items: center; text-align: center; }
+.qrcard { width: min(72%, 16rem); padding: .5rem; background: #fff; border-radius: 1.2rem; box-shadow: 0 10px 28px rgba(0,0,0,.35); }
+.qrcard svg { display: block; width: 100%; height: auto; }
+.qrname { margin: 1.2rem 0 .1rem; font-size: 1.3rem; }
+.qrwrap .btn { width: 100%; max-width: 20rem; }
+.scanbox { width: 100%; max-width: 20rem; aspect-ratio: 1; border-radius: 1.2rem; overflow: hidden; background: var(--panel2); }
+.scanv { width: 100%; height: 100%; object-fit: cover; }
+.creator { padding: 1.6rem 1.4rem 2rem; display: flex; flex-direction: column; align-items: center; text-align: center; }
+.creator h2 { margin: .9rem 0 .1rem; font-size: 1.4rem; }
+.creator .role { color: var(--mute); font-size: .85rem; margin: 0 0 1.4rem; letter-spacing: .04em; }
+.creator p { max-width: 30rem; text-align: left; line-height: 1.65; margin: 0 0 1rem; color: var(--ink2); }
+.lockbox { text-align: center; }
+.lockic { width: 4.4rem; height: 4.4rem; margin: 2rem auto 1rem; border-radius: 50%; border: 1px solid var(--line2); display: grid; place-items: center; color: var(--mute); }
+.lockic .ic { width: 1.8rem; height: 1.8rem; }
+.pinbar { flex: none; display: flex; align-items: center; gap: .6rem; padding: .5rem 1rem; background: var(--panel); border-bottom: 1px solid var(--line); cursor: pointer; }
+.pinbar .ic { width: 1rem; height: 1rem; color: var(--mute); }
+.pinbar .mid b { font-size: .72rem; color: var(--mute); font-weight: 600; }
+.pinbar .mid span { color: var(--ink); font-size: .88rem; }
+.body > .libsum:first-child { padding-top: 1rem; }
